@@ -7,7 +7,7 @@ monotonic clock.
 ## Run
 
 ```powershell
-py -3 summoner_timer.py
+py -3 src/summoner_timer.py
 ```
 
 Enter each opponent's name, choose both spells, adjust a cooldown when needed,
