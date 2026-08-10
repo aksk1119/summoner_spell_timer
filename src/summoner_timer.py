@@ -49,6 +49,29 @@ def format_time(seconds):
     return "{:02d}:{:02d}".format(minutes, seconds)
 
 
+class GameClock:
+    def __init__(self, clock=time.monotonic):
+        self._clock = clock
+        self._start = None
+
+    @property
+    def is_running(self):
+        return self._start is not None
+
+    @property
+    def elapsed_seconds(self):
+        if self._start is None:
+            return 0
+        return int(self._clock() - self._start)
+
+    def start(self):
+        if self._start is None:
+            self._start = self._clock()
+
+    def reset(self):
+        self._start = None
+
+
 def adjusted_cooldown(base_seconds, cosmic_insight=False):
     if not cosmic_insight:
         return base_seconds
@@ -61,14 +84,17 @@ def tracking_duration(base_seconds, cosmic_insight=False):
 
 
 class SpellTimer(ttk.Frame):
-    def __init__(self, parent, spell_name="Flash", cosmic_insight=None, shortcut=""):
+    def __init__(self, parent, spell_name="Flash", cosmic_insight=None, shortcut="", game_clock=None):
         ttk.Frame.__init__(self, parent, style="Timer.TFrame", padding=(7, 5))
         self.timer = CountdownTimer()
         self.cosmic_insight = cosmic_insight
+        self.game_clock = game_clock
         self.shortcut = shortcut
         self.spell_name = tk.StringVar(value=spell_name)
         self.cooldown = tk.StringVar(value=str(SPELL_COOLDOWNS[spell_name]))
         self.time_text = tk.StringVar(value="READY")
+        self.ready_at_text = tk.StringVar(value="")
+        self._ready_at_game_seconds = None
 
         self.spell_box = ttk.Combobox(
             self,
@@ -112,6 +138,13 @@ class SpellTimer(ttk.Frame):
             command=self.reset,
             width=12,
         ).grid(row=0, column=4)
+        ttk.Label(
+            self,
+            textvariable=self.ready_at_text,
+            style="ReadyAt.Timer.TLabel",
+            width=7,
+            anchor="center",
+        ).grid(row=0, column=5, padx=(5, 0))
 
     def _select_spell(self, _event=None):
         self.cooldown.set(str(SPELL_COOLDOWNS[self.spell_name.get()]))
@@ -133,9 +166,14 @@ class SpellTimer(ttk.Frame):
             self.cosmic_insight is not None and self.cosmic_insight.get()
         )
         self.timer.start(tracking_duration(duration, has_cosmic_insight))
+        if self.game_clock is not None and self.game_clock.is_running:
+            self._ready_at_game_seconds = self.game_clock.elapsed_seconds + self.timer.duration_seconds
+        else:
+            self._ready_at_game_seconds = None
         self.refresh()
 
     def reset(self):
+        self._ready_at_game_seconds = None
         self.timer.reset()
         self.refresh()
 
@@ -145,14 +183,19 @@ class SpellTimer(ttk.Frame):
             self.time_text.set(format_time(remaining))
             self.time_label.configure(style="Running.Timer.TLabel")
             self.start_button.state(["disabled"])
+            if self._ready_at_game_seconds is not None:
+                self.ready_at_text.set(format_time(self._ready_at_game_seconds))
+            else:
+                self.ready_at_text.set("")
         else:
             self.time_text.set("READY")
             self.time_label.configure(style="Ready.Timer.TLabel")
             self.start_button.state(["!disabled"])
+            self.ready_at_text.set("")
 
 
 class SummonerRow(ttk.Frame):
-    def __init__(self, parent, row_number, shortcuts):
+    def __init__(self, parent, row_number, shortcuts, game_clock=None):
         ttk.Frame.__init__(self, parent, style="Row.TFrame", padding=(8, 6))
         self.columnconfigure(1, weight=1)
         self.name = tk.StringVar(value="Enemy {}".format(row_number))
@@ -171,8 +214,8 @@ class SummonerRow(ttk.Frame):
         ).grid(row=0, column=1, sticky="w", padx=(7, 0))
 
         self.spells = (
-            SpellTimer(self, "Flash", self.cosmic_insight, shortcuts[0]),
-            SpellTimer(self, "Ignite", self.cosmic_insight, shortcuts[1]),
+            SpellTimer(self, "Flash", self.cosmic_insight, shortcuts[0], game_clock),
+            SpellTimer(self, "Ignite", self.cosmic_insight, shortcuts[1], game_clock),
         )
         self.spells[0].grid(row=0, column=1, padx=(0, 5), sticky="ew")
         self.spells[1].grid(row=0, column=2, sticky="ew")
@@ -197,6 +240,7 @@ class SummonerTimerApp:
         self.root.minsize(1220, 460)
         self.root.configure(bg="#101418")
         self.always_on_top = tk.BooleanVar(value=True)
+        self.game_clock = GameClock()
         self._configure_styles()
         self._build_ui()
         self._bind_shortcuts()
@@ -236,6 +280,19 @@ class SummonerTimerApp:
             foreground="#ff9a82",
             font=("Consolas", 15, "bold"),
             padding=(4, 4),
+        )
+        style.configure(
+            "ReadyAt.Timer.TLabel",
+            background="#252e36",
+            foreground="#b8a060",
+            font=("Consolas", 12),
+            padding=(4, 4),
+        )
+        style.configure(
+            "GameTime.TLabel",
+            background="#101418",
+            foreground="#c8b060",
+            font=("Consolas", 15, "bold"),
         )
         style.configure(
             "TButton",
@@ -293,8 +350,21 @@ class SummonerTimerApp:
             variable=self.always_on_top,
             command=self._set_topmost,
         ).grid(row=0, column=1, padx=(12, 12))
+        self.game_time_text = tk.StringVar(value="--:--")
+        ttk.Label(
+            header,
+            textvariable=self.game_time_text,
+            style="GameTime.TLabel",
+        ).grid(row=0, column=2, padx=(0, 8))
+        self.game_start_button = ttk.Button(
+            header, text="Start Game [G]", command=self.start_game
+        )
+        self.game_start_button.grid(row=0, column=3, padx=(0, 6))
+        ttk.Button(
+            header, text="Reset Game [Ctrl+G]", command=self.reset_game
+        ).grid(row=0, column=4, padx=(0, 12))
         ttk.Button(header, text="Reset all", command=self.reset_all).grid(
-            row=0, column=2
+            row=0, column=5
         )
 
         self.rows = []
@@ -304,7 +374,7 @@ class SummonerTimerApp:
                 key
                 for key in self.SHORTCUT_KEYS[shortcut_offset : shortcut_offset + 2]
             )
-            row = SummonerRow(main, row_number, shortcuts)
+            row = SummonerRow(main, row_number, shortcuts, self.game_clock)
             row.grid(row=row_number, column=0, sticky="ew", pady=2)
             self.rows.append(row)
 
@@ -324,6 +394,10 @@ class SummonerTimerApp:
                 "<Control-Key-{}>".format(key),
                 partial(self._reset_spell, spell),
             )
+        self.root.bind("<Key-g>", self._on_start_game_key)
+        self.root.bind("<Key-G>", self._on_start_game_key)
+        self.root.bind("<Control-Key-g>", lambda _: self.reset_game())
+        self.root.bind("<Control-Key-G>", lambda _: self.reset_game())
 
     def _start_spell(self, spell, event=None):
         editable_widgets = (tk.Entry, ttk.Entry, ttk.Spinbox, ttk.Combobox)
@@ -336,6 +410,22 @@ class SummonerTimerApp:
         spell.reset()
         return "break"
 
+    def start_game(self):
+        self.game_clock.start()
+        self.game_start_button.state(["disabled"])
+
+    def reset_game(self):
+        self.game_clock.reset()
+        self.game_time_text.set("--:--")
+        self.game_start_button.state(["!disabled"])
+
+    def _on_start_game_key(self, event=None):
+        editable_widgets = (tk.Entry, ttk.Entry, ttk.Spinbox, ttk.Combobox)
+        if event is not None and isinstance(event.widget, editable_widgets):
+            return None
+        self.start_game()
+        return "break"
+
     def reset_all(self):
         for row in self.rows:
             row.reset()
@@ -343,6 +433,8 @@ class SummonerTimerApp:
     def _refresh(self):
         for row in self.rows:
             row.refresh()
+        if self.game_clock.is_running:
+            self.game_time_text.set(format_time(self.game_clock.elapsed_seconds))
         self.root.after(self.REFRESH_MS, self._refresh)
 
 

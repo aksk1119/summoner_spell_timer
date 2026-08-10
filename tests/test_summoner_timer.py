@@ -1,6 +1,6 @@
 import unittest
 
-from summoner_timer import CountdownTimer, adjusted_cooldown, format_time
+from summoner_timer import CountdownTimer, GameClock, adjusted_cooldown, format_time
 
 
 class FakeClock:
@@ -9,6 +9,35 @@ class FakeClock:
 
     def __call__(self):
         return self.now
+
+
+class GameClockTests(unittest.TestCase):
+    def setUp(self):
+        self.clock = FakeClock()
+        self.game_clock = GameClock(self.clock)
+
+    def test_not_running_before_start(self):
+        self.assertFalse(self.game_clock.is_running)
+        self.assertEqual(0, self.game_clock.elapsed_seconds)
+
+    def test_elapsed_increases_after_start(self):
+        self.game_clock.start()
+        self.assertTrue(self.game_clock.is_running)
+        self.clock.now += 75.9
+        self.assertEqual(75, self.game_clock.elapsed_seconds)
+
+    def test_start_is_idempotent(self):
+        self.game_clock.start()
+        self.clock.now += 10
+        self.game_clock.start()  # second call must not reset the origin
+        self.assertEqual(10, self.game_clock.elapsed_seconds)
+
+    def test_reset_stops_clock(self):
+        self.game_clock.start()
+        self.clock.now += 30
+        self.game_clock.reset()
+        self.assertFalse(self.game_clock.is_running)
+        self.assertEqual(0, self.game_clock.elapsed_seconds)
 
 
 class CountdownTimerTests(unittest.TestCase):
