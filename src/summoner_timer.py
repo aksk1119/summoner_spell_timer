@@ -229,6 +229,145 @@ class SummonerRow(ttk.Frame):
             spell.refresh()
 
 
+class OverlayWindow(tk.Toplevel):
+    """Compact transparent overlay; mouse-only, no keyboard bindings."""
+
+    _ALPHA_DEFAULT = 0.85
+    _BG = "#0d1117"
+    _BAR_BG = "#1a2430"
+
+    def __init__(self, parent_app):
+        super().__init__(parent_app.root)
+        self._app = parent_app
+        self._drag_x = self._drag_y = 0
+        self._spell_entries = []  # (timer_label, start_btn, spell)
+
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self._alpha_var = tk.DoubleVar(value=self._ALPHA_DEFAULT)
+        self.attributes("-alpha", self._ALPHA_DEFAULT)
+        self.configure(bg=self._BG)
+        self.resizable(False, False)
+
+        self._build()
+        self._reposition()
+
+    def _build(self):
+        bar = tk.Frame(self, bg=self._BAR_BG, height=26)
+        bar.pack(fill="x")
+        bar.pack_propagate(False)
+
+        title = tk.Label(bar, text="\u25a3 Spell Timer", bg=self._BAR_BG, fg="#98a7b3",
+                         font=("Segoe UI", 9))
+        title.pack(side="left", padx=(6, 4))
+
+        tk.Label(
+            bar, textvariable=self._app.game_time_text,
+            bg=self._BAR_BG, fg="#c8b060", font=("Consolas", 9, "bold"),
+        ).pack(side="left", padx=(0, 10))
+
+        tk.Label(bar, text="Opacity", bg=self._BAR_BG, fg="#98a7b3",
+                 font=("Segoe UI", 8)).pack(side="left")
+        tk.Scale(
+            bar, from_=0.2, to=1.0, resolution=0.05,
+            variable=self._alpha_var, orient="horizontal", length=80,
+            bg=self._BAR_BG, fg="#98a7b3", troughcolor="#2d3d4c",
+            highlightthickness=0, showvalue=False,
+            command=lambda _: self.attributes("-alpha", self._alpha_var.get()),
+        ).pack(side="left", padx=(2, 8))
+
+        tk.Button(
+            bar, text="\u00d7", bg=self._BAR_BG, fg="#ff6b6b",
+            font=("Segoe UI", 11, "bold"), bd=0, padx=4, pady=0,
+            activebackground="#2d3d4c", command=self._close,
+        ).pack(side="right")
+        tk.Button(
+            bar, text="Edit", bg=self._BAR_BG, fg="#98a7b3",
+            font=("Segoe UI", 8), bd=0, padx=5, pady=0,
+            activebackground="#2d3d4c", command=self._open_editor,
+        ).pack(side="right", padx=(0, 2))
+
+        for w in (bar, title):
+            w.bind("<ButtonPress-1>", self._drag_start)
+            w.bind("<B1-Motion>", self._drag_move)
+
+        body = tk.Frame(self, bg=self._BG, padx=5, pady=3)
+        body.pack(fill="both", expand=True)
+
+        for row in self._app.rows:
+            rf = tk.Frame(body, bg=self._BG)
+            rf.pack(fill="x", pady=1)
+
+            tk.Label(
+                rf, textvariable=row.name,
+                bg=self._BG, fg="#98a7b3",
+                font=("Segoe UI", 9), width=10, anchor="w",
+            ).pack(side="left", padx=(0, 3))
+
+            for spell in row.spells:
+                sf = tk.Frame(rf, bg="#141c24", padx=2, pady=1)
+                sf.pack(side="left", padx=2)
+
+                tk.Label(
+                    sf, textvariable=spell.spell_name,
+                    bg="#141c24", fg="#c8d0d6",
+                    font=("Segoe UI", 9), width=7, anchor="w",
+                ).pack(side="left")
+
+                timer_lbl = tk.Label(
+                    sf, textvariable=spell.time_text,
+                    bg="#173c32", fg="#72e0b1",
+                    font=("Consolas", 9, "bold"), width=6, anchor="center",
+                )
+                timer_lbl.pack(side="left", padx=2)
+
+                start_btn = tk.Button(
+                    sf, text="\u25b6", bd=0, padx=3, pady=0,
+                    bg="#33414c", fg="#f4f0e8", font=("Segoe UI", 7),
+                    activebackground="#496070", command=spell.start,
+                )
+                start_btn.pack(side="left")
+                tk.Button(
+                    sf, text="\u21ba", bd=0, padx=3, pady=0,
+                    bg="#33414c", fg="#ff9a82", font=("Segoe UI", 7),
+                    activebackground="#496070", command=spell.reset,
+                ).pack(side="left", padx=(1, 0))
+
+                self._spell_entries.append((timer_lbl, start_btn, spell))
+
+    def _drag_start(self, event):
+        self._drag_x, self._drag_y = event.x, event.y
+
+    def _drag_move(self, event):
+        x = self.winfo_x() + event.x - self._drag_x
+        y = self.winfo_y() + event.y - self._drag_y
+        self.geometry(f"+{x}+{y}")
+
+    def _reposition(self):
+        self.update_idletasks()
+        sw = self.winfo_screenwidth()
+        w = self.winfo_reqwidth()
+        self.geometry(f"+{sw - w - 20}+30")
+
+    def _open_editor(self):
+        self._app.root.deiconify()
+        self._app.root.lift()
+
+    def _close(self):
+        self._app._overlay = None
+        self._app.root.deiconify()
+        self.destroy()
+
+    def refresh(self):
+        for timer_lbl, start_btn, spell in self._spell_entries:
+            if spell.timer.is_running:
+                timer_lbl.configure(bg="#4b2525", fg="#ff9a82")
+                start_btn.configure(state="disabled")
+            else:
+                timer_lbl.configure(bg="#173c32", fg="#72e0b1")
+                start_btn.configure(state="normal")
+
+
 class SummonerTimerApp:
     REFRESH_MS = 200
     SHORTCUT_KEYS = ("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
@@ -241,6 +380,7 @@ class SummonerTimerApp:
         self.root.configure(bg="#101418")
         self.always_on_top = tk.BooleanVar(value=True)
         self.game_clock = GameClock()
+        self._overlay = None
         self._configure_styles()
         self._build_ui()
         self._bind_shortcuts()
@@ -366,6 +506,9 @@ class SummonerTimerApp:
         ttk.Button(header, text="Reset all", command=self.reset_all).grid(
             row=0, column=5
         )
+        ttk.Button(header, text="Overlay", command=self._toggle_overlay).grid(
+            row=0, column=6, padx=(6, 0)
+        )
 
         self.rows = []
         for row_number in range(1, 6):
@@ -430,11 +573,20 @@ class SummonerTimerApp:
         for row in self.rows:
             row.reset()
 
+    def _toggle_overlay(self):
+        if self._overlay is not None:
+            self._overlay._close()
+            return
+        self._overlay = OverlayWindow(self)
+        self.root.withdraw()
+
     def _refresh(self):
         for row in self.rows:
             row.refresh()
         if self.game_clock.is_running:
             self.game_time_text.set(format_time(self.game_clock.elapsed_seconds))
+        if self._overlay is not None:
+            self._overlay.refresh()
         self.root.after(self.REFRESH_MS, self._refresh)
 
 
