@@ -1,7 +1,68 @@
+import sys
 import time
 import tkinter as tk
 from functools import partial
 from tkinter import messagebox, ttk
+
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    _user32 = ctypes.windll.user32
+    # 32-bit user32.dll doesn't export the "Ptr" variants at all.
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        _LONG_PTR = ctypes.c_longlong
+        _GetWindowLong = _user32.GetWindowLongPtrW
+        _SetWindowLong = _user32.SetWindowLongPtrW
+    else:
+        _LONG_PTR = ctypes.c_long
+        _GetWindowLong = _user32.GetWindowLongW
+        _SetWindowLong = _user32.SetWindowLongW
+
+    _GetWindowLong.restype = _LONG_PTR
+    _GetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int]
+    _SetWindowLong.restype = _LONG_PTR
+    _SetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int, _LONG_PTR]
+    _user32.SetWindowPos.argtypes = [
+        wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, wintypes.UINT,
+    ]
+    _user32.SetLayeredWindowAttributes.argtypes = [
+        wintypes.HWND, wintypes.COLORREF, wintypes.BYTE, wintypes.DWORD,
+    ]
+
+    _GWL_EXSTYLE = -20
+    _WS_EX_LAYERED = 0x00080000
+    _WS_EX_TOPMOST = 0x00000008
+    _WS_EX_NOACTIVATE = 0x08000000
+    _WS_EX_TOOLWINDOW = 0x00000080
+    _HWND_TOPMOST = -1
+    _SWP_NOMOVE = 0x0002
+    _SWP_NOSIZE = 0x0001
+    _SWP_NOACTIVATE = 0x0010
+    _LWA_ALPHA = 0x2
+
+    def _apply_overlay_styles(hwnd, alpha):
+        """One-time style setup. Changing GWL_EXSTYLE resets the layered
+        window's alpha, so it must be reapplied via SetLayeredWindowAttributes
+        right after, otherwise the overlay renders fully transparent/invisible."""
+        ex_style = _GetWindowLong(hwnd, _GWL_EXSTYLE)
+        ex_style |= _WS_EX_LAYERED | _WS_EX_TOPMOST | _WS_EX_NOACTIVATE | _WS_EX_TOOLWINDOW
+        _SetWindowLong(hwnd, _GWL_EXSTYLE, ex_style)
+        _user32.SetLayeredWindowAttributes(hwnd, 0, int(alpha * 255), _LWA_ALPHA)
+
+    def _force_topmost(hwnd):
+        """Reassert HWND_TOPMOST z-order only, so fullscreen games can't bury the overlay."""
+        _user32.SetWindowPos(
+            hwnd, _HWND_TOPMOST, 0, 0, 0, 0,
+            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE,
+        )
+else:
+    def _apply_overlay_styles(hwnd, alpha):
+        pass
+
+    def _force_topmost(hwnd):
+        pass
 
 
 SPELL_COOLDOWNS = {
@@ -251,6 +312,9 @@ class OverlayWindow(tk.Toplevel):
 
         self._build()
         self._reposition()
+        self.update_idletasks()
+        _apply_overlay_styles(self.winfo_id(), self._alpha_var.get())
+        _force_topmost(self.winfo_id())
 
     def _build(self):
         bar = tk.Frame(self, bg=self._BAR_BG, height=26)
@@ -359,6 +423,7 @@ class OverlayWindow(tk.Toplevel):
         self.destroy()
 
     def refresh(self):
+        _force_topmost(self.winfo_id())
         for timer_lbl, start_btn, spell in self._spell_entries:
             if spell.timer.is_running:
                 timer_lbl.configure(bg="#4b2525", fg="#ff9a82")
