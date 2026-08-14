@@ -188,16 +188,16 @@ class SpellTimer(ttk.Frame):
 
         self.start_button = ttk.Button(
             self,
-            text="Start [{}]".format(shortcut),
+            text="Start [Ctrl+Shift+{}]".format(shortcut),
             command=self.start,
-            width=8,
+            width=20,
         )
         self.start_button.grid(row=0, column=3, padx=(0, 3))
         ttk.Button(
             self,
-            text="Reset [Ctrl+{}]".format(shortcut),
+            text="Reset [Ctrl+Alt+Shift+{}]".format(shortcut),
             command=self.reset,
-            width=12,
+            width=25,
         ).grid(row=0, column=4)
         ttk.Label(
             self,
@@ -291,7 +291,7 @@ class SummonerRow(ttk.Frame):
 
 
 class OverlayWindow(tk.Toplevel):
-    """Compact transparent overlay; mouse-only, no keyboard bindings."""
+    """Compact transparent overlay; read-only status display, no start/reset controls."""
 
     _ALPHA_DEFAULT = 0.85
     _BG = "#0d1117"
@@ -301,7 +301,7 @@ class OverlayWindow(tk.Toplevel):
         super().__init__(parent_app.root)
         self._app = parent_app
         self._drag_x = self._drag_y = 0
-        self._spell_entries = []  # (timer_label, start_btn, spell)
+        self._spell_entries = []  # (timer_label, ready_at_label, spell)
 
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -385,19 +385,14 @@ class OverlayWindow(tk.Toplevel):
                 )
                 timer_lbl.pack(side="left", padx=2)
 
-                start_btn = tk.Button(
-                    sf, text="\u25b6", bd=0, padx=3, pady=0,
-                    bg="#33414c", fg="#f4f0e8", font=("Segoe UI", 7),
-                    activebackground="#496070", command=spell.start,
+                ready_at_lbl = tk.Label(
+                    sf, textvariable=spell.ready_at_text,
+                    bg="#141c24", fg="#b8a060",
+                    font=("Consolas", 9), width=6, anchor="center",
                 )
-                start_btn.pack(side="left")
-                tk.Button(
-                    sf, text="\u21ba", bd=0, padx=3, pady=0,
-                    bg="#33414c", fg="#ff9a82", font=("Segoe UI", 7),
-                    activebackground="#496070", command=spell.reset,
-                ).pack(side="left", padx=(1, 0))
+                ready_at_lbl.pack(side="left", padx=(2, 0))
 
-                self._spell_entries.append((timer_lbl, start_btn, spell))
+                self._spell_entries.append((timer_lbl, ready_at_lbl, spell))
 
     def _drag_start(self, event):
         self._drag_x, self._drag_y = event.x, event.y
@@ -424,18 +419,20 @@ class OverlayWindow(tk.Toplevel):
 
     def refresh(self):
         _force_topmost(self.winfo_id())
-        for timer_lbl, start_btn, spell in self._spell_entries:
+        for timer_lbl, ready_at_lbl, spell in self._spell_entries:
             if spell.timer.is_running:
                 timer_lbl.configure(bg="#4b2525", fg="#ff9a82")
-                start_btn.configure(state="disabled")
             else:
                 timer_lbl.configure(bg="#173c32", fg="#72e0b1")
-                start_btn.configure(state="normal")
+            ready_at_lbl.configure(fg="#b8a060" if spell.ready_at_text.get() else "#3a4652")
 
 
 class SummonerTimerApp:
     REFRESH_MS = 200
-    SHORTCUT_KEYS = ("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
+    # Row-major flat list: (digit, F-key) per row, matching [spell for row in rows for spell in row.spells].
+    SHORTCUT_KEYS = ("1", "F1", "2", "F2", "3", "F3", "4", "F4", "5", "F5")
+    # Shift remaps digit keysyms to punctuation; function keys are unaffected.
+    _DIGIT_SHIFT_SYMBOLS = {"1": "exclam", "2": "at", "3": "numbersign", "4": "dollar", "5": "percent"}
 
     def __init__(self, root):
         self.root = root
@@ -593,13 +590,14 @@ class SummonerTimerApp:
 
     def _bind_shortcuts(self):
         spells = [spell for row in self.rows for spell in row.spells]
-        for key, spell in zip(self.SHORTCUT_KEYS, spells):
+        for shortcut, spell in zip(self.SHORTCUT_KEYS, spells):
+            keysym = self._DIGIT_SHIFT_SYMBOLS.get(shortcut, shortcut)
             self.root.bind(
-                "<Key-{}>".format(key),
+                "<Control-Shift-Key-{}>".format(keysym),
                 partial(self._start_spell, spell),
             )
             self.root.bind(
-                "<Control-Key-{}>".format(key),
+                "<Control-Alt-Shift-Key-{}>".format(keysym),
                 partial(self._reset_spell, spell),
             )
         self.root.bind("<Key-g>", self._on_start_game_key)
