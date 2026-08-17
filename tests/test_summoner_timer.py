@@ -1,6 +1,14 @@
+import tkinter as tk
 import unittest
 
-from summoner_timer import CountdownTimer, GameClock, adjusted_cooldown, format_time
+from summoner_timer import (
+    CountdownTimer,
+    GameClock,
+    OverlayWindow,
+    SummonerTimerApp,
+    adjusted_cooldown,
+    format_time,
+)
 
 
 class FakeClock:
@@ -76,6 +84,20 @@ class CountdownTimerTests(unittest.TestCase):
     def test_cosmic_insight_applies_summoner_spell_haste(self):
         self.assertAlmostEqual(254.237, adjusted_cooldown(300, True), places=3)
         self.assertEqual(300, adjusted_cooldown(300, False))
+
+
+class OverlayShortcutTests(unittest.TestCase):
+    def test_overlay_shortcuts_are_bound_to_overlay_when_main_window_is_hidden(self):
+        root = tk.Tk()
+        try:
+            app = SummonerTimerApp(root)
+            app.root.withdraw()
+            overlay = OverlayWindow(app)
+            self.assertNotEqual("", overlay.bind("<Control-Key-g>"))
+            self.assertNotEqual("", overlay.bind("<Alt-Key-g>"))
+            overlay.destroy()
+        finally:
+            root.destroy()
 
 
 if __name__ == "__main__":

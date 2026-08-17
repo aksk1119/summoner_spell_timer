@@ -300,6 +300,7 @@ class OverlayWindow(tk.Toplevel):
     def __init__(self, parent_app):
         super().__init__(parent_app.root)
         self._app = parent_app
+        self.root = parent_app.root
         self._drag_x = self._drag_y = 0
         self._spell_entries = []  # (timer_label, ready_at_label, spell)
 
@@ -310,11 +311,31 @@ class OverlayWindow(tk.Toplevel):
         self.configure(bg=self._BG)
         self.resizable(False, False)
 
+        self._bind_shortcuts()
         self._build()
         self._reposition()
         self.update_idletasks()
+        self.focus_set()
         _apply_overlay_styles(self.winfo_id(), self._alpha_var.get())
         _force_topmost(self.winfo_id())
+
+    def _bind_shortcuts(self):
+        self.bind("<Control-Key-g>", self._app._on_start_game_key)
+        self.bind("<Control-Key-G>", self._app._on_start_game_key)
+        self.bind("<Alt-Key-g>", lambda _: self._app.reset_game())
+        self.bind("<Alt-Key-G>", lambda _: self._app.reset_game())
+
+        spells = [spell for row in self._app.rows for spell in row.spells]
+        for shortcut, spell in zip(self._app.SHORTCUT_KEYS, spells):
+            keysym = self._app._DIGIT_SHIFT_SYMBOLS.get(shortcut, shortcut)
+            self.bind(
+                "<Control-Shift-Key-{}>".format(keysym),
+                partial(self._app._start_spell, spell),
+            )
+            self.bind(
+                "<Control-Alt-Shift-Key-{}>".format(keysym),
+                partial(self._app._reset_spell, spell),
+            )
 
     def _build(self):
         bar = tk.Frame(self, bg=self._BAR_BG, height=26)
@@ -600,10 +621,10 @@ class SummonerTimerApp:
                 "<Control-Alt-Shift-Key-{}>".format(keysym),
                 partial(self._reset_spell, spell),
             )
-        self.root.bind("<Key-g>", self._on_start_game_key)
-        self.root.bind("<Key-G>", self._on_start_game_key)
-        self.root.bind("<Control-Key-g>", lambda _: self.reset_game())
-        self.root.bind("<Control-Key-G>", lambda _: self.reset_game())
+        self.root.bind("<Control-Key-g>", self._on_start_game_key)
+        self.root.bind("<Control-Key-G>", self._on_start_game_key)
+        self.root.bind("<Alt-Key-g>", lambda _: self.reset_game())
+        self.root.bind("<Alt-Key-G>", lambda _: self.reset_game())
 
     def _start_spell(self, spell, event=None):
         editable_widgets = (tk.Entry, ttk.Entry, ttk.Spinbox, ttk.Combobox)
