@@ -17,9 +17,9 @@ that row. The cooldown field remains editable because base values can vary by
 patch and game mode.
 
 Start timers with **1** through **0**, ordered from the first enemy's left spell
-to the fifth enemy's right spell. The shortcut is shown on each Start button
-and works while the timer window is active. Number keys remain available while
-editing a name or cooldown field.
+to the fifth enemy's right spell. The shortcut is shown on each Start button.
+On Windows, shortcuts work globally even while another application is active.
+Number keys remain available while editing a name or cooldown field.
 
 ## Test
 

@@ -1,4 +1,6 @@
 import sys
+import queue
+import threading
 import time
 import tkinter as tk
 from functools import partial
@@ -41,6 +43,41 @@ if sys.platform == "win32":
     _SWP_NOSIZE = 0x0001
     _SWP_NOACTIVATE = 0x0010
     _LWA_ALPHA = 0x2
+    _MOD_ALT = 0x0001
+    _MOD_CONTROL = 0x0002
+    _MOD_SHIFT = 0x0004
+    _WM_HOTKEY = 0x0312
+    _PM_REMOVE = 0x0001
+
+    class _MSG(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("message", wintypes.UINT),
+            ("wParam", wintypes.WPARAM),
+            ("lParam", wintypes.LPARAM),
+            ("time", wintypes.DWORD),
+            ("pt_x", ctypes.c_long),
+            ("pt_y", ctypes.c_long),
+        ]
+
+    _user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+    _user32.RegisterHotKey.restype = wintypes.BOOL
+    _user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.UnregisterHotKey.restype = wintypes.BOOL
+    _user32.PeekMessageW.argtypes = [
+        ctypes.POINTER(_MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT, wintypes.UINT,
+    ]
+    _user32.PeekMessageW.restype = wintypes.BOOL
+    _user32.GetMessageW.argtypes = [
+        ctypes.POINTER(_MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT,
+    ]
+    _user32.GetMessageW.restype = ctypes.c_int
+    _user32.PostThreadMessageW.argtypes = [
+        wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+    ]
+    _user32.PostThreadMessageW.restype = wintypes.BOOL
+    _kernel32 = ctypes.windll.kernel32
+    _kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
     def _apply_overlay_styles(hwnd, alpha):
         """One-time style setup. Changing GWL_EXSTYLE resets the layered
@@ -63,6 +100,85 @@ else:
 
     def _force_topmost(hwnd):
         pass
+
+
+class GlobalHotkeys:
+    """Register application shortcuts with Windows even when unfocused."""
+
+    _ID_START_GAME = 1
+    _ID_RESET_GAME = 2
+    _ID_FIRST_SPELL = 100
+
+    def __init__(self, root, app):
+        self.root = root
+        self.app = app
+        self._registrations = []
+        self._callbacks = {}
+        self._pending = queue.Queue()
+        self._stop = threading.Event()
+        self._ready = threading.Event()
+        self._thread = None
+        self._thread_id = None
+
+        if sys.platform != "win32":
+            return
+
+        self._callbacks[self._ID_START_GAME] = app.start_game
+        self._callbacks[self._ID_RESET_GAME] = app.reset_game
+        self._registrations.extend((
+            (self._ID_START_GAME, _MOD_CONTROL, ord("G")),
+            (self._ID_RESET_GAME, _MOD_ALT, ord("G")),
+        ))
+        for index, (shortcut, spell) in enumerate(
+            zip(app.SHORTCUT_KEYS, [spell for row in app.rows for spell in row.spells])
+        ):
+            virtual_key = ord(shortcut) if shortcut.isdigit() else 0x70 + int(shortcut[1:])
+            hotkey_id = self._ID_FIRST_SPELL + index
+            self._callbacks[hotkey_id] = spell.start
+            self._callbacks[hotkey_id + len(app.SHORTCUT_KEYS)] = spell.reset
+            self._registrations.extend((
+                (hotkey_id, _MOD_CONTROL | _MOD_SHIFT, virtual_key),
+                (hotkey_id + len(app.SHORTCUT_KEYS), _MOD_CONTROL | _MOD_ALT | _MOD_SHIFT, virtual_key),
+            ))
+        self._thread = threading.Thread(target=self._message_loop, daemon=True)
+        self._thread.start()
+        self._ready.wait(1)
+        self._poll()
+
+    def _poll(self):
+        if self._stop.is_set():
+            return
+        while True:
+            try:
+                hotkey_id = self._pending.get_nowait()
+            except queue.Empty:
+                break
+            callback = self._callbacks.get(hotkey_id)
+            if callback is not None:
+                callback()
+        self.root.after(50, self._poll)
+
+    def _message_loop(self):
+        self._thread_id = _kernel32.GetCurrentThreadId()
+        for hotkey_id, modifiers, virtual_key in self._registrations:
+            _user32.RegisterHotKey(None, hotkey_id, modifiers, virtual_key)
+        self._ready.set()
+
+        message = _MSG()
+        while not self._stop.is_set() and _user32.GetMessageW(message, None, 0, 0) > 0:
+            if message.message == _WM_HOTKEY:
+                self._pending.put(message.wParam)
+        for hotkey_id, _modifiers, _virtual_key in self._registrations:
+            _user32.UnregisterHotKey(None, hotkey_id)
+
+    def unregister(self):
+        if sys.platform != "win32":
+            return
+        self._stop.set()
+        if self._thread_id is not None:
+            _user32.PostThreadMessageW(self._thread_id, 0x0012, 0, 0)
+        if self._thread is not None:
+            self._thread.join(timeout=1)
 
 
 SPELL_COOLDOWNS = {
@@ -467,7 +583,13 @@ class SummonerTimerApp:
         self._configure_styles()
         self._build_ui()
         self._bind_shortcuts()
+        self._global_hotkeys = GlobalHotkeys(root, self)
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
         self._refresh()
+
+    def _close(self):
+        self._global_hotkeys.unregister()
+        self.root.destroy()
 
     def _configure_styles(self):
         style = ttk.Style(self.root)
