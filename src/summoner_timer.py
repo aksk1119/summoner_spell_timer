@@ -160,6 +160,9 @@ class GlobalHotkeys:
 
     def _message_loop(self):
         self._thread_id = _kernel32.GetCurrentThreadId()
+        _user32.PeekMessageW(
+            _MSG(), None, 0, 0, _PM_REMOVE
+        )
         for hotkey_id, modifiers, virtual_key in self._registrations:
             _user32.RegisterHotKey(None, hotkey_id, modifiers, virtual_key)
         self._ready.set()
@@ -304,17 +307,17 @@ class SpellTimer(ttk.Frame):
 
         self.start_button = ttk.Button(
             self,
-            text="Start [Ctrl+Shift+{}]".format(shortcut),
+            text="Start",
             command=self.start,
-            width=20,
         )
         self.start_button.grid(row=0, column=3, padx=(0, 3))
+
         ttk.Button(
             self,
-            text="Reset [Ctrl+Alt+Shift+{}]".format(shortcut),
+            text="Reset",
             command=self.reset,
-            width=25,
         ).grid(row=0, column=4)
+
         ttk.Label(
             self,
             textvariable=self.ready_at_text,
@@ -372,10 +375,10 @@ class SpellTimer(ttk.Frame):
 
 
 class SummonerRow(ttk.Frame):
-    def __init__(self, parent, row_number, shortcuts, game_clock=None):
+    def __init__(self, parent, name, shortcuts, spell_1="Flash", spell_2="Ignite", game_clock=None):
         ttk.Frame.__init__(self, parent, style="Row.TFrame", padding=(8, 6))
         self.columnconfigure(1, weight=1)
-        self.name = tk.StringVar(value="Enemy {}".format(row_number))
+        self.name = tk.StringVar(value=name)
         self.cosmic_insight = tk.BooleanVar(value=False)
 
         identity = ttk.Frame(self, style="Row.TFrame")
@@ -391,8 +394,8 @@ class SummonerRow(ttk.Frame):
         ).grid(row=0, column=1, sticky="w", padx=(7, 0))
 
         self.spells = (
-            SpellTimer(self, "Flash", self.cosmic_insight, shortcuts[0], game_clock),
-            SpellTimer(self, "Ignite", self.cosmic_insight, shortcuts[1], game_clock),
+            SpellTimer(self, spell_1, self.cosmic_insight, shortcuts[0], game_clock),
+            SpellTimer(self, spell_2, self.cosmic_insight, shortcuts[1], game_clock),
         )
         self.spells[0].grid(row=0, column=1, padx=(0, 5), sticky="ew")
         self.spells[1].grid(row=0, column=2, sticky="ew")
@@ -716,13 +719,14 @@ class SummonerTimerApp:
         )
 
         self.rows = []
+        lane_names = ["Top", "Jungle", "Mid", "Bot", "Support"]
         for row_number in range(1, 6):
             shortcut_offset = (row_number - 1) * 2
             shortcuts = tuple(
                 key
                 for key in self.SHORTCUT_KEYS[shortcut_offset : shortcut_offset + 2]
             )
-            row = SummonerRow(main, row_number, shortcuts, self.game_clock)
+            row = SummonerRow(main, name=lane_names[row_number - 1], shortcuts=shortcuts, game_clock=self.game_clock)
             row.grid(row=row_number, column=0, sticky="ew", pady=2)
             self.rows.append(row)
 
